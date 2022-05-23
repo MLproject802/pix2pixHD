@@ -3,7 +3,7 @@ import torch.nn as nn
 import functools
 from torch.autograd import Variable
 import numpy as np
-
+import torchvision.transforms as transforms
 ###############################################################################
 # Functions
 ###############################################################################
@@ -252,6 +252,28 @@ class ResnetBlock(nn.Module):
         out = x + self.conv_block(x)
         return out
 
+class IdentityNetwork(nn.Module):
+    def __init__(self, input_nc=3, output_nc=3, norm_layer=nn.BatchNorm2d):    
+        super(IdentityNetwork, self).__init__() 
+        self.output_nc = output_nc        
+
+        model = [nn.Conv2d(input_nc, 32, kernel_size=8,stride=4, padding=0), 
+                 norm_layer(32), nn.ReLU(True)]             
+        ### downsample two times
+        for i in range(2):
+            mult = 2**i
+            model += [nn.Conv2d(32 * mult, 32 * mult * 2, kernel_size=4, stride=2, padding=1),
+                      norm_layer(32 * mult * 2), nn.ReLU(True)]
+
+        ### upsample         
+        model += [nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=0, output_padding=0),
+                       norm_layer(64), nn.ReLU(True)]        
+        model += [nn.ConvTranspose2d(64, output_nc, kernel_size=5,stride=4, padding=1,output_padding=1), nn.Tanh()]
+        self.model = nn.Sequential(*model) 
+    def forward(self, input):
+        merged_feature = self.model(input)
+        return merged_feature
+
 class Encoder(nn.Module):
     def __init__(self, input_nc, output_nc, ngf=32, n_downsampling=4, norm_layer=nn.BatchNorm2d):
         super(Encoder, self).__init__()        
@@ -276,13 +298,14 @@ class Encoder(nn.Module):
 
     def forward(self, input, inst):
         outputs = self.model(input)
-
-        # instance-wise average pooling
+        #print("fake_image_size_is",outputs.shape)
+        #instance-wise average pooling
         outputs_mean = outputs.clone()
         inst_list = np.unique(inst.cpu().numpy().astype(int))        
         for i in inst_list:
             for b in range(input.size()[0]):
-                indices = (inst[b:b+1] == int(i)).nonzero() # n x 4            
+                indices = (inst[b:b+1] == int(i)).nonzero() # n x 4     
+                #print(b,"!",indices.shape)       
                 for j in range(self.output_nc):
                     output_ins = outputs[indices[:,0] + b, indices[:,1] + j, indices[:,2], indices[:,3]]                    
                     mean_feat = torch.mean(output_ins).expand_as(output_ins)                                        
